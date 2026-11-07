@@ -20,6 +20,7 @@
 		<template #default>
 			<div class="kanban-view">
 				<div
+					ref="boardRef"
 					:class="{ 'is-loading': showInitialLoading, 'is-dragging': drag || dragBucket }"
 					class="kanban kanban-bucket-container loader-container"
 				>
@@ -301,7 +302,7 @@ import {
 	useUpdateBucketMutation,
 	useLoadBucketPageMutation,
 } from '@/client/queries/kanbanMutations'
-import {computed, nextTick, ref, watch, toRef} from 'vue'
+import {computed, nextTick, ref, watch, toRef, onMounted, onBeforeUnmount} from 'vue'
 import {useQuery, useQueryClient} from '@tanstack/vue-query'
 import {useRouter} from 'vue-router'
 import {useRouteQuery} from '@vueuse/router'
@@ -347,6 +348,10 @@ const TaskDraggable = draggableFor<TaskResponse>()
 
 const projectId = toRef(props, 'projectId')
 
+// Distance from the board's left/right edge (in px) at which a running drag starts scrolling it.
+const BOARD_EDGE_SCROLL_PX = 80
+const BOARD_SCROLL_SPEED_PX = 16
+
 const DRAG_OPTIONS = {
 	// sortable options
 	animation: 150,
@@ -354,7 +359,68 @@ const DRAG_OPTIONS = {
 	dragClass: 'task-dragging',
 	delayOnTouchOnly: true,
 	delay: 1000,
+	scroll: true,
+	scrollSensitivity: BOARD_EDGE_SCROLL_PX,
+	scrollSpeed: BOARD_SCROLL_SPEED_PX,
 } as const
+
+const boardRef = ref<HTMLElement | null>(null)
+let edgeScrollFrame: number | null = null
+let dragPointerX = 0
+
+function stopBoardEdgeScroll() {
+	if (edgeScrollFrame !== null) {
+		cancelAnimationFrame(edgeScrollFrame)
+		edgeScrollFrame = null
+	}
+}
+
+function boardEdgeScrollStep() {
+	edgeScrollFrame = null
+	if (!drag.value || boardRef.value === null) {
+		return
+	}
+
+	const board = boardRef.value
+	const rect = board.getBoundingClientRect()
+	let direction = 0
+	if (dragPointerX <= rect.left + BOARD_EDGE_SCROLL_PX) {
+		direction = -1
+	} else if (dragPointerX >= rect.right - BOARD_EDGE_SCROLL_PX) {
+		direction = 1
+	}
+
+	if (direction === 0) {
+		return
+	}
+
+	const before = board.scrollLeft
+	board.scrollLeft += direction * BOARD_SCROLL_SPEED_PX
+	if (board.scrollLeft !== before) {
+		edgeScrollFrame = requestAnimationFrame(boardEdgeScrollStep)
+	}
+}
+
+// Native drags only emit dragover events, so the board edge scroll is driven from them.
+// The capture phase keeps the listener ahead of the drag & drop library's own handlers.
+function onBoardDragOver(e: DragEvent) {
+	if (!drag.value) {
+		return
+	}
+	dragPointerX = e.clientX
+	if (edgeScrollFrame === null) {
+		edgeScrollFrame = requestAnimationFrame(boardEdgeScrollStep)
+	}
+}
+
+onMounted(() => {
+	document.addEventListener('dragover', onBoardDragOver, true)
+})
+
+onBeforeUnmount(() => {
+	document.removeEventListener('dragover', onBoardDragOver, true)
+	stopBoardEdgeScroll()
+})
 
 const MIN_SCROLL_HEIGHT_PERCENT = 0.25
 

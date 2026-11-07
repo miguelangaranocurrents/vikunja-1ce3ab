@@ -152,7 +152,7 @@
 					{{ $t('misc.save') }}
 				</BaseButton>
 			</li>
-			<li v-if="!isEditing">
+			<li v-if="!isEditing && isEditEnabled">
 				<BaseButton
 					class="done-edit"
 					@click="() => setEdit()"
@@ -457,6 +457,13 @@ async function setEditIfApplicable(event: MouseEvent) {
 
 function setEdit(focus: boolean = true) {
 	internalMode.value = 'edit'
+	if (isEditing.value) {
+		// The watchEffect syncing the editable flag only flushes after this handler returns.
+		// Apply it here too, so focus() targets an editable view — otherwise the view stays
+		// read-only and unfocused, and the next text input merges into the old content
+		// instead of replacing it.
+		editor.value?.setEditable(true, false)
+	}
 	if (focus) {
 		editor.value?.commands.focus()
 	}
